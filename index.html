@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF 페이지 분할기</title>
+  <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f5f5f7;
+      color: #1d1d1f;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 48px 20px;
+    }
+    h1 {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .subtitle {
+      color: #6e6e73;
+      font-size: 15px;
+      margin-bottom: 40px;
+    }
+    .card {
+      background: white;
+      border-radius: 18px;
+      padding: 40px;
+      width: 100%;
+      max-width: 560px;
+      box-shadow: 0 2px 20px rgba(0,0,0,0.08);
+    }
+
+    /* Drop Zone */
+    .drop-zone {
+      border: 2px dashed #d2d2d7;
+      border-radius: 12px;
+      padding: 48px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .drop-zone:hover, .drop-zone.drag-over {
+      border-color: #0071e3;
+      background: #f0f7ff;
+    }
+    .drop-zone input { display: none; }
+    .drop-zone .icon { font-size: 40px; margin-bottom: 12px; }
+    .drop-zone .label { font-size: 16px; font-weight: 500; color: #1d1d1f; }
+    .drop-zone .hint  { font-size: 13px; color: #6e6e73; margin-top: 4px; }
+
+    /* File Info */
+    .file-info {
+      display: none;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 16px;
+      background: #f5f5f7;
+      border-radius: 10px;
+      margin-top: 20px;
+    }
+    .file-info .file-icon { font-size: 28px; }
+    .file-info .file-name { font-size: 14px; font-weight: 600; word-break: break-all; }
+    .file-info .file-meta { font-size: 13px; color: #6e6e73; }
+    .file-info .reset-btn {
+      margin-left: auto;
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: #6e6e73;
+      font-size: 18px;
+      padding: 4px;
+      flex-shrink: 0;
+    }
+    .file-info .reset-btn:hover { color: #ff3b30; }
+
+    /* Mode Tabs */
+    .mode-tabs {
+      display: none;
+      margin-top: 28px;
+      background: #f5f5f7;
+      border-radius: 10px;
+      padding: 4px;
+    }
+    .mode-tabs button {
+      flex: 1;
+      padding: 9px 12px;
+      border: none;
+      background: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      color: #6e6e73;
+      cursor: pointer;
+      transition: all 0.2s;
+      width: 50%;
+    }
+    .mode-tabs button.active {
+      background: white;
+      color: #0071e3;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+    }
+    .mode-tabs { display: none; flex-direction: row; }
+
+    /* Options Panel */
+    .options {
+      display: none;
+      margin-top: 20px;
+    }
+    .options .section-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: #6e6e73;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .range-input {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1.5px solid #d2d2d7;
+      border-radius: 10px;
+      font-size: 15px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .range-input:focus { border-color: #0071e3; }
+    .range-hint {
+      font-size: 12px;
+      color: #6e6e73;
+      margin-top: 6px;
+    }
+    .split-all-note {
+      padding: 14px;
+      background: #f0f7ff;
+      border-radius: 10px;
+      font-size: 14px;
+      color: #0071e3;
+    }
+
+    /* Action Button */
+    .action-btn {
+      display: none;
+      width: 100%;
+      margin-top: 24px;
+      padding: 14px;
+      background: #0071e3;
+      color: white;
+      border: none;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .action-btn:hover { background: #0077ed; }
+    .action-btn:disabled {
+      background: #d2d2d7;
+      cursor: not-allowed;
+    }
+
+    /* Progress */
+    .progress-wrap {
+      display: none;
+      margin-top: 16px;
+    }
+    .progress-bar-track {
+      height: 6px;
+      background: #e5e5ea;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: #0071e3;
+      border-radius: 4px;
+      width: 0%;
+      transition: width 0.2s;
+    }
+    .progress-label {
+      font-size: 13px;
+      color: #6e6e73;
+      margin-top: 6px;
+      text-align: center;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 32px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: #1d1d1f;
+      color: white;
+      padding: 12px 24px;
+      border-radius: 24px;
+      font-size: 14px;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.3s;
+      white-space: nowrap;
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+    .toast.error { background: #ff3b30; }
+  </style>
+</head>
+<body>
+  <h1>PDF 페이지 분할기</h1>
+  <p class="subtitle">PDF 파일을 업로드하고 원하는 방식으로 분할하세요</p>
+
+  <div class="card">
+    <!-- Upload -->
+    <div class="drop-zone" id="dropZone">
+      <input type="file" id="fileInput" accept=".pdf">
+      <div class="icon">📄</div>
+      <div class="label">PDF 파일을 여기에 드래그하거나 클릭하여 선택</div>
+      <div class="hint">최대 파일 크기 제한 없음 · 파일은 브라우저 내에서만 처리됩니다</div>
+    </div>
+
+    <!-- File Info -->
+    <div class="file-info" id="fileInfo">
+      <span class="file-icon">📄</span>
+      <div>
+        <div class="file-name" id="fileName"></div>
+        <div class="file-meta" id="fileMeta"></div>
+      </div>
+      <button class="reset-btn" id="resetBtn" title="파일 제거">✕</button>
+    </div>
+
+    <!-- Mode Tabs -->
+    <div class="mode-tabs" id="modeTabs">
+      <button id="tabSplitAll" class="active" onclick="setMode('all')">모든 페이지 분리</button>
+      <button id="tabRange"               onclick="setMode('range')">범위 지정 추출</button>
+    </div>
+
+    <!-- Options -->
+    <div class="options" id="options">
+      <div id="panelAll">
+        <div class="split-all-note">
+          📦 각 페이지를 개별 PDF 파일로 분리하여 ZIP으로 다운로드합니다.
+        </div>
+      </div>
+      <div id="panelRange" style="display:none">
+        <div class="section-label">추출할 페이지 범위</div>
+        <input
+          type="text"
+          class="range-input"
+          id="rangeInput"
+          placeholder="예: 1-3, 5, 7-10"
+        >
+        <div class="range-hint">쉼표(,)로 여러 범위 구분 · 하이픈(-)으로 연속 범위 지정 · 페이지 순서대로 합쳐진 PDF 1개 다운로드</div>
+      </div>
+    </div>
+
+    <!-- Action Button -->
+    <button class="action-btn" id="actionBtn" onclick="run()">분할 시작</button>
+
+    <!-- Progress -->
+    <div class="progress-wrap" id="progressWrap">
+      <div class="progress-bar-track">
+        <div class="progress-bar-fill" id="progressFill"></div>
+      </div>
+      <div class="progress-label" id="progressLabel">처리 중...</div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const { PDFDocument } = PDFLib;
+
+    let pdfBytes = null;
+    let pageCount = 0;
+    let currentMode = 'all';
+    let originalFilename = '';
+
+    // ── Drop Zone ──────────────────────────────────────────
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+
+    dropZone.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', e => loadFile(e.target.files[0]));
+
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('drag-over');
+      const file = e.dataTransfer.files[0];
+      if (file && file.type === 'application/pdf') loadFile(file);
+      else showToast('PDF 파일만 업로드할 수 있습니다.', 'error');
+    });
+
+    document.getElementById('resetBtn').addEventListener('click', resetFile);
+
+    // ── Load File ──────────────────────────────────────────
+    async function loadFile(file) {
+      if (!file) return;
+      if (file.type !== 'application/pdf') { showToast('PDF 파일만 업로드할 수 있습니다.', 'error'); return; }
+
+      const reader = new FileReader();
+      reader.onload = async e => {
+        pdfBytes = new Uint8Array(e.target.result);
+        try {
+          const doc = await PDFDocument.load(pdfBytes);
+          pageCount = doc.getPageCount();
+          originalFilename = file.name.replace(/\.pdf$/i, '');
+
+          document.getElementById('fileName').textContent = file.name;
+          document.getElementById('fileMeta').textContent =
+            `${pageCount}페이지 · ${formatSize(file.size)}`;
+
+          document.getElementById('dropZone').style.display = 'none';
+          document.getElementById('fileInfo').style.display  = 'flex';
+          document.getElementById('modeTabs').style.display  = 'flex';
+          document.getElementById('options').style.display   = 'block';
+          document.getElementById('actionBtn').style.display = 'block';
+        } catch {
+          showToast('PDF 파일을 읽을 수 없습니다.', 'error');
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    function resetFile() {
+      pdfBytes = null; pageCount = 0; originalFilename = '';
+      fileInput.value = '';
+      document.getElementById('dropZone').style.display  = '';
+      document.getElementById('fileInfo').style.display  = 'none';
+      document.getElementById('modeTabs').style.display  = 'none';
+      document.getElementById('options').style.display   = 'none';
+      document.getElementById('actionBtn').style.display = 'none';
+      document.getElementById('progressWrap').style.display = 'none';
+      document.getElementById('rangeInput').value = '';
+      setMode('all');
+    }
+
+    // ── Mode ───────────────────────────────────────────────
+    function setMode(mode) {
+      currentMode = mode;
+      document.getElementById('tabSplitAll').classList.toggle('active', mode === 'all');
+      document.getElementById('tabRange').classList.toggle('active', mode === 'range');
+      document.getElementById('panelAll').style.display   = mode === 'all'   ? '' : 'none';
+      document.getElementById('panelRange').style.display = mode === 'range' ? '' : 'none';
+      document.getElementById('actionBtn').textContent =
+        mode === 'all' ? '분할 시작 (ZIP 다운로드)' : '추출 시작 (PDF 다운로드)';
+    }
+
+    // ── Run ────────────────────────────────────────────────
+    async function run() {
+      if (!pdfBytes) return;
+      if (currentMode === 'all') await runSplitAll();
+      else await runExtractRange();
+    }
+
+    async function runSplitAll() {
+      setProgress(0, `0 / ${pageCount} 페이지 처리 중...`);
+      document.getElementById('actionBtn').disabled = true;
+
+      try {
+        const srcDoc = await PDFDocument.load(pdfBytes);
+        const zip = new JSZip();
+        const folder = zip.folder(originalFilename);
+
+        for (let i = 0; i < pageCount; i++) {
+          const newDoc = await PDFDocument.create();
+          const [page] = await newDoc.copyPages(srcDoc, [i]);
+          newDoc.addPage(page);
+          const bytes = await newDoc.save();
+          const padded = String(i + 1).padStart(String(pageCount).length, '0');
+          folder.file(`page_${padded}.pdf`, bytes);
+          setProgress(Math.round(((i + 1) / pageCount) * 100), `${i + 1} / ${pageCount} 페이지 처리 중...`);
+        }
+
+        setProgress(100, 'ZIP 파일 생성 중...');
+        const blob = await zip.generateAsync({ type: 'blob' });
+        download(blob, `${originalFilename}_split.zip`);
+        showToast(`✅ ${pageCount}페이지를 ZIP으로 저장했습니다.`);
+      } catch (err) {
+        showToast('처리 중 오류가 발생했습니다.', 'error');
+        console.error(err);
+      } finally {
+        document.getElementById('actionBtn').disabled = false;
+        hideProgress();
+      }
+    }
+
+    async function runExtractRange() {
+      const rangeStr = document.getElementById('rangeInput').value.trim();
+      if (!rangeStr) { showToast('페이지 범위를 입력하세요.', 'error'); return; }
+
+      let indices;
+      try { indices = parseRange(rangeStr, pageCount); }
+      catch (err) { showToast(err.message, 'error'); return; }
+      if (indices.length === 0) { showToast('유효한 페이지 번호를 입력하세요.', 'error'); return; }
+
+      setProgress(0, '추출 중...');
+      document.getElementById('actionBtn').disabled = true;
+
+      try {
+        const srcDoc = await PDFDocument.load(pdfBytes);
+        const newDoc = await PDFDocument.create();
+        const pages = await newDoc.copyPages(srcDoc, indices);
+        pages.forEach(p => newDoc.addPage(p));
+        setProgress(80, 'PDF 생성 중...');
+        const bytes = await newDoc.save();
+        download(new Blob([bytes], { type: 'application/pdf' }), `${originalFilename}_extracted.pdf`);
+        setProgress(100, '완료');
+        showToast(`✅ ${indices.length}페이지를 추출했습니다.`);
+      } catch (err) {
+        showToast('처리 중 오류가 발생했습니다.', 'error');
+        console.error(err);
+      } finally {
+        document.getElementById('actionBtn').disabled = false;
+        hideProgress();
+      }
+    }
+
+    // ── Helpers ────────────────────────────────────────────
+    function parseRange(str, max) {
+      const indices = new Set();
+      const parts = str.split(',');
+      for (const part of parts) {
+        const t = part.trim();
+        if (!t) continue;
+        if (t.includes('-')) {
+          const [a, b] = t.split('-').map(n => parseInt(n.trim()));
+          if (isNaN(a) || isNaN(b)) throw new Error(`잘못된 범위: "${t}"`);
+          if (a < 1 || b > max || a > b) throw new Error(`범위 오류: "${t}" (1-${max} 내에서 지정하세요)`);
+          for (let i = a; i <= b; i++) indices.add(i - 1);
+        } else {
+          const n = parseInt(t);
+          if (isNaN(n)) throw new Error(`잘못된 페이지 번호: "${t}"`);
+          if (n < 1 || n > max) throw new Error(`${n}페이지는 존재하지 않습니다. (1-${max})`);
+          indices.add(n - 1);
+        }
+      }
+      return [...indices].sort((a, b) => a - b);
+    }
+
+    function download(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+    }
+
+    function formatSize(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    function setProgress(pct, label) {
+      document.getElementById('progressWrap').style.display = 'block';
+      document.getElementById('progressFill').style.width = pct + '%';
+      document.getElementById('progressLabel').textContent = label;
+    }
+
+    function hideProgress() {
+      setTimeout(() => { document.getElementById('progressWrap').style.display = 'none'; }, 1200);
+    }
+
+    let toastTimer;
+    function showToast(msg, type = '') {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.className = 'toast show' + (type === 'error' ? ' error' : '');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => { el.className = 'toast'; }, 3000);
+    }
+
+    // init mode label
+    setMode('all');
+  </script>
+</body>
+</html>
+```
