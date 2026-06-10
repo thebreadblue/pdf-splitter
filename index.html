@@ -413,7 +413,7 @@
         pages.forEach(p => newDoc.addPage(p));
         setProgress(80, 'PDF 생성 중...');
         const bytes = await newDoc.save();
-        download(new Blob([bytes], { type: 'application/pdf' }), `${originalFilename}_extracted.pdf`);
+        download(new Blob([bytes], { type: 'application/octet-stream' }), `${originalFilename}_extracted.pdf`);
         setProgress(100, '완료');
         showToast(`✅ ${indices.length}페이지를 추출했습니다.`);
       } catch (err) {
