@@ -398,25 +398,45 @@
       const rangeStr = document.getElementById('rangeInput').value.trim();
       if (!rangeStr) { showToast('페이지 범위를 입력하세요.', 'error'); return; }
 
-      let indices;
-      try { indices = parseRange(rangeStr, pageCount); }
+      let segments;
+      try { segments = parseSegments(rangeStr, pageCount); }
       catch (err) { showToast(err.message, 'error'); return; }
-      if (indices.length === 0) { showToast('유효한 페이지 번호를 입력하세요.', 'error'); return; }
+      if (segments.length === 0) { showToast('유효한 페이지 번호를 입력하세요.', 'error'); return; }
 
-      setProgress(0, '추출 중...');
+      setProgress(0, `0 / ${segments.length} 범위 처리 중...`);
       document.getElementById('actionBtn').disabled = true;
 
       try {
         const srcDoc = await PDFDocument.load(pdfBytes);
-        const newDoc = await PDFDocument.create();
-        const copied = await newDoc.copyPages(srcDoc, indices);
-        copied.forEach(p => newDoc.addPage(p));
-        setProgress(80, 'PDF 생성 중...');
-        const outBytes = await newDoc.save();
-        console.log(`[추출] 원본: ${pageCount}페이지 / 추출: ${newDoc.getPageCount()}페이지 / 원본크기: ${pdfBytes.length}bytes / 추출크기: ${outBytes.length}bytes`);
-        download(new Blob([outBytes], { type: 'application/octet-stream' }), `${originalFilename}_p${indices.map(i=>i+1).join('-')}.pdf`);
-        setProgress(100, '완료');
-        showToast(`✅ ${newDoc.getPageCount()}페이지 추출 완료 (원본 ${pageCount}페이지 중)`);
+
+        if (segments.length === 1) {
+          // 범위 1개 → 단일 PDF
+          const seg = segments[0];
+          const newDoc = await PDFDocument.create();
+          const copied = await newDoc.copyPages(srcDoc, seg.indices);
+          copied.forEach(p => newDoc.addPage(p));
+          const outBytes = await newDoc.save();
+          setProgress(100, '완료');
+          download(new Blob([outBytes], { type: 'application/octet-stream' }), `${originalFilename}_p${seg.label}.pdf`);
+          showToast(`✅ ${newDoc.getPageCount()}페이지 추출 완료`);
+        } else {
+          // 범위 여러 개 → ZIP
+          const zip = new JSZip();
+          for (let i = 0; i < segments.length; i++) {
+            const seg = segments[i];
+            const newDoc = await PDFDocument.create();
+            const copied = await newDoc.copyPages(srcDoc, seg.indices);
+            copied.forEach(p => newDoc.addPage(p));
+            const outBytes = await newDoc.save();
+            zip.file(`${originalFilename}_p${seg.label}.pdf`, outBytes);
+            setProgress(Math.round(((i + 1) / segments.length) * 85), `${i + 1} / ${segments.length} 범위 처리 중...`);
+          }
+          setProgress(95, 'ZIP 생성 중...');
+          const blob = await zip.generateAsync({ type: 'blob' });
+          download(blob, `${originalFilename}_extracted.zip`);
+          showToast(`✅ ${segments.length}개 범위를 ZIP으로 저장했습니다.`);
+          setProgress(100, '완료');
+        }
       } catch (err) {
         showToast('처리 중 오류가 발생했습니다.', 'error');
         console.error(err);
@@ -427,8 +447,9 @@
     }
 
     // ── Helpers ────────────────────────────────────────────
-    function parseRange(str, max) {
-      const indices = new Set();
+    // 각 쉼표 구분 세그먼트를 { label, indices } 로 반환
+    function parseSegments(str, max) {
+      const segments = [];
       const parts = str.split(',');
       for (const part of parts) {
         const t = part.trim();
@@ -437,15 +458,17 @@
           const [a, b] = t.split('-').map(n => parseInt(n.trim()));
           if (isNaN(a) || isNaN(b)) throw new Error(`잘못된 범위: "${t}"`);
           if (a < 1 || b > max || a > b) throw new Error(`범위 오류: "${t}" (1-${max} 내에서 지정하세요)`);
-          for (let i = a; i <= b; i++) indices.add(i - 1);
+          const indices = [];
+          for (let i = a; i <= b; i++) indices.push(i - 1);
+          segments.push({ label: `${a}-${b}`, indices });
         } else {
           const n = parseInt(t);
           if (isNaN(n)) throw new Error(`잘못된 페이지 번호: "${t}"`);
           if (n < 1 || n > max) throw new Error(`${n}페이지는 존재하지 않습니다. (1-${max})`);
-          indices.add(n - 1);
+          segments.push({ label: `${n}`, indices: [n - 1] });
         }
       }
-      return [...indices].sort((a, b) => a - b);
+      return segments;
     }
 
     function download(blob, filename) {
